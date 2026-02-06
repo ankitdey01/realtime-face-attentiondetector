@@ -94,7 +94,7 @@ def detect_gaze_direction(landmarks, w, h):
                 return "looking_down"
             elif vertical_ratio < 0.15:  # Head up
                 return "looking_up"
-            elif 0.3 <= vertical_ratio <= 0.4:  # Normal head position
+            elif 0.15 <= vertical_ratio <= 0.5:  # Normal head position
                 return "looking_at_screen"
             else:
                 return "idk"  # Default to screen for borderline cases
