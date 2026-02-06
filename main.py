@@ -141,7 +141,7 @@ def analyze_faces():
     """
     # Create FaceLandmarker options
     options = FaceLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path='face_landmarker.task'),
+        base_options=BaseOptions(model_asset_path='models/face_landmarker.task'),
         running_mode=VisionRunningMode.VIDEO,
         num_faces=1,
         min_face_detection_confidence=0.5,
