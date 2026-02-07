@@ -120,16 +120,15 @@ def detect_gaze_direction(landmarks, w, h):
         # Horizontal: 0.65-0.7 = screen, <0.65 = left, >0.7 = right
         # Vertical: 0.125-0.5 = normal range, <0.125 = looking up, >0.5 = looking down
         
-        if 0.65 <= avg_gaze_ratio <= 0.7:
+        #if 0.65 <= avg_gaze_ratio <= 0.7:
             # Check vertical gaze using nose position with updated thresholds
-            if vertical_ratio > 0.5:  # Head down
-                return "looking_down"
-            elif vertical_ratio < 0.2:  # Head up
-                return "looking_up"
-            elif 0.125 <= vertical_ratio <= 0.5:  # Normal head position
-                return "looking_at_screen"
-            else:
-                return "looking_at_screen"  # Default to screen for borderline cases
+            
+        
+        if vertical_ratio > 0.5:  # Head down
+            return "looking_down"
+        elif vertical_ratio < 0.16:  # Head up
+            return "looking_up"
+        # Default to screen for borderline cases
         elif avg_gaze_ratio < 0.6:
             return "looking_left"
         elif avg_gaze_ratio > 0.68:
@@ -308,7 +307,7 @@ def analyze_faces():
             frame_count += 1
 
             # Add delay to reduce FPS to ~10 frames per second
-            time.sleep(0.3)  # 100ms delay = ~10 FPS
+            #time.sleep(0.3)  # 100ms delay = ~10 FPS
 
             # Exit on 'q' key press
             if cv2.waitKey(1) & 0xFF == ord('q'):
