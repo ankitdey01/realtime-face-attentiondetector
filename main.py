@@ -114,9 +114,9 @@ def detect_gaze_direction(landmarks, w, h):
         # Horizontal: 0.65-0.7 = screen, <0.65 = left, >0.7 = right
         # Vertical: 0.125-0.5 = normal range, <0.125 = looking up, >0.5 = looking down
         
-        if avg_gaze_ratio < 0.6:
+        if avg_gaze_ratio < 0.58: # Looking left
             return "looking_left"
-        elif avg_gaze_ratio > 0.68:
+        elif avg_gaze_ratio > 0.68: # Looking right
             return "looking_right"
         if vertical_ratio > 0.5:  # Head down
             return "looking_down"
