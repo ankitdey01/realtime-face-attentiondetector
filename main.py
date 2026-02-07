@@ -9,7 +9,6 @@ FaceLandmarker = mp.tasks.vision.FaceLandmarker
 FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-ATTENTION_THRESHOLD = 0
 
 def get_camera():
     """Returns a camera capture object using DirectShow backend"""
@@ -29,19 +28,16 @@ def detect_gaze_direction(landmarks, w, h):
         # Get key facial landmarks for gaze estimation
         # Eye center points
         left_eye_center = np.array([
-            (landmarks[33].x + landmarks[133].x) / 2 * w,
-            (landmarks[33].y + landmarks[133].y) / 2 * h
+            (landmarks[33].x + landmarks[133].x) * w / 2,
+            (landmarks[33].y + landmarks[133].y) * h / 2
         ])
         right_eye_center = np.array([
-            (landmarks[362].x + landmarks[263].x) / 2 * w,
-            (landmarks[362].y + landmarks[263].y) / 2 * h
+            (landmarks[362].x + landmarks[263].x) * w / 2,
+            (landmarks[362].y + landmarks[263].y) * h / 2
         ])
         
         # Nose tip for head orientation
         nose_tip = np.array([landmarks[1].x * w, landmarks[1].y * h])
-        
-        # Face center (between eyes)
-        face_center = (left_eye_center + right_eye_center) / 2
         
         # Eye corners for iris position estimation
         left_eye_outer = np.array([landmarks[33].x * w, landmarks[33].y * h])
@@ -64,9 +60,6 @@ def detect_gaze_direction(landmarks, w, h):
             right_pupil = right_eye_center
         
         # Calculate horizontal gaze using head rotation and eye direction
-        # Method 1: Head rotation using face landmarks
-        
-        
         # Calculate face center line (nose to forehead)
         forehead_center = np.array([landmarks[9].x * w, landmarks[9].y * h])  # Forehead center
         
@@ -107,22 +100,18 @@ def detect_gaze_direction(landmarks, w, h):
         chin_point = np.array([landmarks[152].x * w, landmarks[152].y * h])  # Chin landmark
         
         # Calculate vertical ratios
-        eye_to_chin_distance = abs(chin_point[1] - face_center[1])
-        nose_to_eye_distance = abs(nose_tip[1] - face_center[1])
+        eye_to_chin_distance = abs(chin_point[1] - (left_eye_center[1] + right_eye_center[1]) / 2)
+        nose_to_eye_distance = abs(nose_tip[1] - (left_eye_center[1] + right_eye_center[1]) / 2)
         
         # Normalize: 0 = nose at eye level, 1 = nose at chin level
         vertical_ratio = nose_to_eye_distance / eye_to_chin_distance if eye_to_chin_distance > 0 else 0
         
         # Debug output for calibration
-        print(f"DEBUG GAZE - Horizontal ratio: ____{avg_gaze_ratio:.3f}____, Vertical ratio: ____{vertical_ratio:.3f}____")
+        print(f"DEBUG GAZE - Horizontal ratio: {avg_gaze_ratio:.3f}, Vertical ratio: {vertical_ratio:.3f}")
         
         # Determine gaze direction with updated sweet spot thresholds
         # Horizontal: 0.65-0.7 = screen, <0.65 = left, >0.7 = right
         # Vertical: 0.125-0.5 = normal range, <0.125 = looking up, >0.5 = looking down
-        
-        #if 0.65 <= avg_gaze_ratio <= 0.7:
-            # Check vertical gaze using nose position with updated thresholds
-            
         
         if vertical_ratio > 0.5:  # Head down
             return "looking_down"
@@ -145,15 +134,11 @@ def eye_aspect_ratio(landmarks, eye_idx, w, h):
     try:
         eye = [(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in eye_idx]
         
-        # Use the standard 6-point EAR calculation for eyes
-        # Points: [0]=left corner, [1]=top left, [2]=top right, [3]=right corner, [4]=bottom right, [5]=bottom left
-        p1, p2, p3, p4, p5, p6 = eye[0], eye[1], eye[2], eye[3], eye[4], eye[5]
-        
         # Calculate vertical distances
-        vertical_1 = np.linalg.norm(np.array(p2) - np.array(p6))
-        vertical_2 = np.linalg.norm(np.array(p3) - np.array(p5))
+        vertical_1 = np.linalg.norm(np.array(eye[1]) - np.array(eye[5]))
+        vertical_2 = np.linalg.norm(np.array(eye[2]) - np.array(eye[4]))
         # Calculate horizontal distance
-        horizontal = np.linalg.norm(np.array(p1) - np.array(p4))
+        horizontal = np.linalg.norm(np.array(eye[0]) - np.array(eye[3]))
         
         # Prevent division by zero
         if horizontal == 0:
@@ -237,9 +222,7 @@ def analyze_faces():
                 
                 # Normalize EAR to 0–100 per eye (typical EAR range is 0.15-0.35 for open eyes)
                 # Eyes closed: ~0.0-0.15, Eyes open: ~0.2-0.35
-                left_score = np.clip((left_ear - 0.1) * 400, 0, 100)
-                right_score = np.clip((right_ear - 0.1) * 400, 0, 100)
-                eye_openness_score = int(left_score + right_score) / 2
+                eye_openness_score = int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2)
                 
                 # Determine gaze status and color
                 gaze_status = gaze_direction.replace("_", " ").upper()
@@ -307,7 +290,7 @@ def analyze_faces():
             frame_count += 1
 
             # Add delay to reduce FPS to ~10 frames per second
-            #time.sleep(0.3)  # 100ms delay = ~10 FPS
+            #time.sleep(0.3)  # 100ms delay = ~3 FPS
 
             # Exit on 'q' key press
             if cv2.waitKey(1) & 0xFF == ord('q'):
