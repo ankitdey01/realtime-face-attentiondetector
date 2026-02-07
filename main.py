@@ -2,6 +2,7 @@ import time
 import cv2
 import mediapipe as mp
 import numpy as np
+import winsound
 
 # MediaPipe FaceLandmarker setup
 BaseOptions = mp.tasks.BaseOptions
@@ -113,15 +114,16 @@ def detect_gaze_direction(landmarks, w, h):
         # Horizontal: 0.65-0.7 = screen, <0.65 = left, >0.7 = right
         # Vertical: 0.125-0.5 = normal range, <0.125 = looking up, >0.5 = looking down
         
+        if avg_gaze_ratio < 0.58:
+            return "looking_left"
+        elif avg_gaze_ratio > 0.68:
+            return "looking_right"
         if vertical_ratio > 0.5:  # Head down
             return "looking_down"
         elif vertical_ratio < 0.16:  # Head up
             return "looking_up"
         # Default to screen for borderline cases
-        elif avg_gaze_ratio < 0.6:
-            return "looking_left"
-        elif avg_gaze_ratio > 0.68:
-            return "looking_right"
+        
         else:
             return "looking_at_screen"
             
@@ -149,6 +151,17 @@ def eye_aspect_ratio(landmarks, eye_idx, w, h):
     except (IndexError, TypeError) as e:
         print(f"Error calculating EAR: {e}")
         return 0.0
+
+def is_user_attentive(gaze_direction, eye_openness_score):
+    """
+    Check if user is attentive based on gaze direction and eye openness
+    Returns: True if attentive, False if distracted
+    """
+    # User is attentive if looking at screen AND eyes are sufficiently open
+    if gaze_direction == "looking_at_screen" and eye_openness_score >= 15:
+        return True
+    else:
+        return False
 
 def analyze_faces():
     """
@@ -209,21 +222,31 @@ def analyze_faces():
                 
                 h, w, _ = frame.shape
                 landmarks = result.face_landmarks[0]
-                
+
                 # Calculate eye aspect ratios
                 left_ear = eye_aspect_ratio(landmarks, LEFT_EYE_IDX, w, h)
                 right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE_IDX, w, h)
-                
+
                 # Detect gaze direction
                 gaze_direction = detect_gaze_direction(landmarks, w, h)
-                
+
+                # Check if user is attentive
+                attentive = is_user_attentive(gaze_direction, int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2))
+
+                # Play beep sound if user is not attentive
+                if not attentive:
+                    try:
+                        winsound.Beep(1000, 200)  # 1000Hz frequency, 200ms duration
+                    except:
+                        pass  # Silently ignore sound errors
+
                 # Debug output to see actual EAR values and gaze
-                print(f"DEBUG - Left EAR: {left_ear:.3f}, Right EAR: {right_ear:.3f}, Gaze: {gaze_direction}\n")
-                
+                print(f"DEBUG - Left EAR: {left_ear:.3f}, Right EAR: {right_ear:.3f}, Gaze: {gaze_direction}, Attentive: {attentive}\n")
+
                 # Normalize EAR to 0–100 per eye (typical EAR range is 0.15-0.35 for open eyes)
                 # Eyes closed: ~0.0-0.15, Eyes open: ~0.2-0.35
                 eye_openness_score = int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2)
-                
+
                 # Determine gaze status and color
                 gaze_status = gaze_direction.replace("_", " ").upper()
                 if gaze_direction == "looking_at_screen":
@@ -263,6 +286,18 @@ def analyze_faces():
                     2
                 )
                 
+                # Draw attention status box around face
+                box_color = (0, 255, 0) if attentive else (0, 0, 255)  # Green if attentive, Red if distracted
+                box_thickness = 3
+                
+                # Draw rectangle around the detected face area
+                face_h, face_w = h, w
+                cv2.rectangle(frame, (50, 50), (face_w - 50, face_h - 50), box_color, box_thickness)
+                
+                # Add attention status text on the box
+                status_text = "ATTENTIVE" if attentive else "DISTRACTED"
+                cv2.putText(frame, status_text, (60, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.8, box_color, 2)
+                
                 # Draw simple eye landmarks
                 for idx in LEFT_EYE_IDX + RIGHT_EYE_IDX:
                     x = int(landmarks[idx].x * w)
@@ -270,7 +305,7 @@ def analyze_faces():
                     cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
                 
                 # Print to console
-                print(f"Frame {frame_count}: Face Detected = True | Faces Found: {num_faces} | Eye Openness: {eye_openness_score}/200")
+                print(f"Frame {frame_count}: Face Detected = True | Faces Found: {num_faces} | Eye Openness: {eye_openness_score}/100")
             else:
                 print(f"Frame {frame_count}: Face Detected = False")
             
