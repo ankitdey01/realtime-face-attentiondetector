@@ -63,12 +63,44 @@ def detect_gaze_direction(landmarks, w, h):
             left_pupil = left_eye_center
             right_pupil = right_eye_center
         
-        # Calculate horizontal gaze ratios (0 = looking left, 0.5 = center, 1 = looking right)
-        left_gaze_ratio = np.linalg.norm(left_pupil - left_eye_inner) / left_eye_width
-        right_gaze_ratio = np.linalg.norm(right_pupil - right_eye_inner) / right_eye_width
+        # Calculate horizontal gaze using head rotation and eye direction
+        # Method 1: Head rotation using face landmarks
         
-        # Average gaze ratio
-        avg_gaze_ratio = (left_gaze_ratio + right_gaze_ratio) / 2
+        
+        # Calculate face center line (nose to forehead)
+        forehead_center = np.array([landmarks[9].x * w, landmarks[9].y * h])  # Forehead center
+        
+        # Vector from forehead to nose
+        face_vector = nose_tip - forehead_center
+        
+        # Calculate head rotation angle
+        head_rotation = np.arctan2(face_vector[0], face_vector[1]) * 180 / np.pi
+        
+        # Method 2: Eye gaze using iris position relative to eye center
+        # Calculate how far pupils are from eye centers horizontally
+        left_eye_horizontal_offset = left_pupil[0] - left_eye_center[0]
+        right_eye_horizontal_offset = right_pupil[0] - right_eye_center[0]
+        
+        # Normalize by eye width for consistency
+        left_gaze_offset = left_eye_horizontal_offset / left_eye_width
+        right_gaze_offset = right_eye_horizontal_offset / right_eye_width
+        
+        # Combine both methods for robust detection
+        # Head rotation: -30° = far left, 0° = center, +30° = far right
+        # Eye gaze: -0.5 = far left, 0 = center, +0.5 = far right
+        
+        # Convert head rotation to -1 to 1 scale
+        head_gaze_ratio = (head_rotation + 30) / 60  # Normalize -30° to +30° range
+        head_gaze_ratio = np.clip(head_gaze_ratio, -1, 1)
+        
+        # Average eye gaze offsets
+        avg_eye_gaze = (left_gaze_offset + right_gaze_offset) / 2
+        
+        # Combine both methods with weights
+        avg_gaze_ratio = (head_gaze_ratio * 0.6) + (avg_eye_gaze * 0.4)
+        
+        # Convert to 0-1 scale for consistency
+        avg_gaze_ratio = (avg_gaze_ratio + 1) / 2
         
         # Calculate vertical gaze using simpler and more reliable method
         # Use the relative position of nose between eyes and chin
@@ -82,25 +114,25 @@ def detect_gaze_direction(landmarks, w, h):
         vertical_ratio = nose_to_eye_distance / eye_to_chin_distance if eye_to_chin_distance > 0 else 0
         
         # Debug output for calibration
-        print(f"DEBUG GAZE - Horizontal ratio: {avg_gaze_ratio:.3f}, Vertical ratio: {vertical_ratio:.3f}")
+        print(f"DEBUG GAZE - Horizontal ratio: ____{avg_gaze_ratio:.3f}____, Vertical ratio: ____{vertical_ratio:.3f}____")
         
-        # Determine gaze direction with simpler logic
-        # Horizontal: 0.3-0.7 = center, <0.3 = left, >0.7 = right
-        # Vertical: 0.2-0.6 = normal range, <0.2 = looking up, >0.6 = looking down
+        # Determine gaze direction with updated sweet spot thresholds
+        # Horizontal: 0.65-0.7 = screen, <0.65 = left, >0.7 = right
+        # Vertical: 0.125-0.5 = normal range, <0.125 = looking up, >0.5 = looking down
         
-        if 0.3 <= avg_gaze_ratio <= 0.7:
+        if 0.65 <= avg_gaze_ratio <= 0.7:
             # Check vertical gaze using nose position with updated thresholds
             if vertical_ratio > 0.5:  # Head down
                 return "looking_down"
-            elif vertical_ratio < 0.15:  # Head up
+            elif vertical_ratio < 0.2:  # Head up
                 return "looking_up"
-            elif 0.15 <= vertical_ratio <= 0.5:  # Normal head position
+            elif 0.125 <= vertical_ratio <= 0.5:  # Normal head position
                 return "looking_at_screen"
             else:
-                return "idk"  # Default to screen for borderline cases
-        elif avg_gaze_ratio < 0.3:
+                return "looking_at_screen"  # Default to screen for borderline cases
+        elif avg_gaze_ratio < 0.6:
             return "looking_left"
-        elif avg_gaze_ratio > 0.7:
+        elif avg_gaze_ratio > 0.68:
             return "looking_right"
         else:
             return "looking_at_screen"
@@ -202,7 +234,7 @@ def analyze_faces():
                 gaze_direction = detect_gaze_direction(landmarks, w, h)
                 
                 # Debug output to see actual EAR values and gaze
-                print(f"DEBUG - Left EAR: {left_ear:.3f}, Right EAR: {right_ear:.3f}, Gaze: {gaze_direction}")
+                print(f"DEBUG - Left EAR: {left_ear:.3f}, Right EAR: {right_ear:.3f}, Gaze: {gaze_direction}\n")
                 
                 # Normalize EAR to 0–100 per eye (typical EAR range is 0.15-0.35 for open eyes)
                 # Eyes closed: ~0.0-0.15, Eyes open: ~0.2-0.35
@@ -265,20 +297,23 @@ def analyze_faces():
             color = (0, 255, 0) if face_detected else (0, 0, 255)
             cv2.putText(frame, status_text, (20, 40),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-            
+
             # Display frame count
             cv2.putText(frame, f"Frame: {frame_count}", (20, 80),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            
+
             # Show the frame
             cv2.imshow("Face Detection Analysis", frame)
-            
+
             frame_count += 1
-            
+
+            # Add delay to reduce FPS to ~10 frames per second
+            time.sleep(0.3)  # 100ms delay = ~10 FPS
+
             # Exit on 'q' key press
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
-    
+
     # Cleanup
     cap.release()
     cv2.destroyAllWindows()
