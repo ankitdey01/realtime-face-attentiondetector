@@ -114,7 +114,7 @@ def detect_gaze_direction(landmarks, w, h):
         # Horizontal: 0.65-0.7 = screen, <0.65 = left, >0.7 = right
         # Vertical: 0.125-0.5 = normal range, <0.125 = looking up, >0.5 = looking down
         
-        if avg_gaze_ratio < 0.58: # Looking left
+        if avg_gaze_ratio < 0.6: # Looking left
             return "looking_left"
         elif avg_gaze_ratio > 0.69: # Looking right
             return "looking_right"
@@ -248,13 +248,18 @@ def analyze_faces():
                 eye_openness_score = int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2)
 
                 # Determine gaze status and color
-                gaze_status = gaze_direction.replace("_", " ").upper()
-                if gaze_direction == "looking_at_screen":
-                    gaze_color = (0, 255, 0)  # Green for looking at screen
-                    attention_status = "ATTENTIVE"
-                else:
-                    gaze_color = (0, 165, 255)  # Orange for looking elsewhere
+                if eye_openness_score < 10:
+                    gaze_status = "EYES CLOSED"
+                    gaze_color = (0, 0, 255)  # Red for closed eyes
                     attention_status = "DISTRACTED"
+                else:
+                    gaze_status = gaze_direction.replace("_", " ").upper()
+                    if gaze_direction == "looking_at_screen":
+                        gaze_color = (0, 255, 0)  # Green for looking at screen
+                        attention_status = "ATTENTIVE"
+                    else:
+                        gaze_color = (0, 165, 255)  # Orange for looking elsewhere
+                        attention_status = "DISTRACTED"
                 
                 cv2.putText(
                     frame,
@@ -328,7 +333,7 @@ def analyze_faces():
             #time.sleep(0.3)  # 100ms delay = ~3 FPS
 
             # Exit on 'q' key press
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            if cv2.waitKey(1) & 0xFF == ord('q') or cv2.waitKey(1) & 0xFF == ord('Q'):
                 break
 
     # Cleanup
