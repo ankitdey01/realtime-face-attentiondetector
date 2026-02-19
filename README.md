@@ -334,8 +334,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👤 Author
 
 **Your Name**
-- GitHub: [@yourusername](https://github.com/ankitdey01)
-- LinkedIn: [Your Profile](https://linkedin.com/in/ankit-dey-0128x)
+- GitHub: [@ankitdey01](https://github.com/ankitdey01)
+- LinkedIn: [Ankit Dey](https://linkedin.com/in/ankit-dey-0128x)
 - Email: ankitdey450@gmail.com
 
 ---
