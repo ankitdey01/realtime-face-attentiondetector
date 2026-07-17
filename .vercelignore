@@ -1,8 +1,2 @@
-venv
-__pycache__
 .git
 .agents
-app.py
-main.py
-requirements.txt
-templates

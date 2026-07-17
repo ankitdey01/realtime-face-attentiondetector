@@ -4,7 +4,7 @@ This repository now contains only the browser version of the app.
 
 ## Live App
 
-Open `index.html` in a browser or use the deployed Vercel URL.
+Use the deployed Vercel URL.
 
 The app runs entirely on the client:
 
@@ -18,13 +18,3 @@ The app runs entirely on the client:
 - `static/`
 - `public/`
 - `models/`
-
-## Removed Local Runtime
-
-The following local-only files were removed:
-
-- `app.py`
-- `main.py`
-- `requirements.txt`
-
-The old Flask/OpenCV workflow is no longer supported.
