@@ -24,7 +24,8 @@ Required static assets:
 static/app.js
 static/styles.css
 models/face_landmarker.task
-public/upscaled-video.mp4
+public/01-1000132806.png
+public/playlistmusic.mp3
 ```
 
 After deployment, anyone can open the Vercel URL and run the detector on their own device. Your laptop does not need to be on because no request is routed back to your machine.

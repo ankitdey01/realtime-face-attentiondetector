@@ -1,7 +1,7 @@
 import {
   FaceLandmarker,
   FilesetResolver,
-} from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs';
+} from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs';
 
 const LEFT_EYE_IDX = [33, 160, 158, 133, 153, 144];
 const RIGHT_EYE_IDX = [362, 385, 387, 263, 373, 380];
@@ -253,7 +253,7 @@ function renderLoop() {
 
 async function createFaceLandmarker(delegate, modelAssetPath) {
   const vision = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
   );
 
   return FaceLandmarker.createFromOptions(vision, {

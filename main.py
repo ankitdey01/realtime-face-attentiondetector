@@ -170,6 +170,13 @@ def is_user_attentive(gaze_direction, eye_openness_score):
         return False
 
 
+def play_attention_alert():
+    try:
+        winsound.Beep(1000, 200)
+    except Exception:
+        pass
+
+
 def create_landmarker_options():
     return FaceLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=get_model_path()),
@@ -212,12 +219,6 @@ def process_frame(frame, landmarker, frame_count):
         eye_openness_score = int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2)
         attentive = is_user_attentive(gaze_direction, eye_openness_score)
 
-        if not attentive:
-            try:
-                winsound.Beep(1000, 200)
-            except Exception:
-                pass
-
         if eye_openness_score < 10:
             gaze_status = "EYES CLOSED"
             gaze_color = (0, 0, 255)
@@ -226,10 +227,9 @@ def process_frame(frame, landmarker, frame_count):
             gaze_status = gaze_direction.replace("_", " ").upper()
             if gaze_direction == "looking_at_screen":
                 gaze_color = (0, 255, 0)
-                attention_status = "ATTENTIVE"
             else:
                 gaze_color = (0, 165, 255)
-                attention_status = "DISTRACTED"
+            attention_status = "ATTENTIVE" if attentive else "DISTRACTED"
 
         cv2.putText(frame, f"Eye Openness: {eye_openness_score}/100", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
         cv2.putText(frame, f"Gaze: {gaze_status}", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, gaze_color, 2)
@@ -265,14 +265,18 @@ def process_frame(frame, landmarker, frame_count):
 
 
 class FaceAttentionPipeline:
+    ALERT_COOLDOWN_SECONDS = 5
+
     def __init__(self):
         self.options = create_landmarker_options()
         self.cap = None
         self.landmarker = None
         self.frame_count = 0
         self.starttime = None
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.latest_frame = None
+        self.last_alert_time = 0
+        self.was_distracted = False
         self.latest_status = {
             "face_detected": False,
             "num_faces": 0,
@@ -285,32 +289,54 @@ class FaceAttentionPipeline:
         }
 
     def start(self):
-        if self.cap is not None:
-            return
+        with self.lock:
+            if self.cap is not None:
+                return
 
-        self.cap = get_camera()
-        if not self.cap.isOpened():
-            raise RuntimeError("Could not open camera")
+            cap = get_camera()
+            landmarker = None
+            try:
+                if not cap.isOpened():
+                    raise RuntimeError("Could not open camera")
 
-        self.starttime = time.time()
-        self.landmarker = FaceLandmarker.create_from_options(self.options)
+                landmarker = FaceLandmarker.create_from_options(self.options)
+            except Exception:
+                cap.release()
+                if landmarker is not None:
+                    landmarker.close()
+                raise
+
+            self.cap = cap
+            self.landmarker = landmarker
+            self.starttime = time.time()
+
+    def handle_attention_alert(self, status):
+        distracted = status["face_detected"] and not status["attentive"]
+        now = time.time()
+        should_alert = distracted and (not self.was_distracted or now - self.last_alert_time >= self.ALERT_COOLDOWN_SECONDS)
+
+        self.was_distracted = distracted
+        if should_alert:
+            self.last_alert_time = now
+            threading.Thread(target=play_attention_alert, daemon=True).start()
 
     def read(self):
-        if self.cap is None or self.landmarker is None:
-            self.start()
-
-        ret, frame = self.cap.read()
-        if not ret:
-            raise RuntimeError("Could not read frame")
-
-        annotated_frame, status = process_frame(frame, self.landmarker, self.frame_count)
-        self.frame_count += 1
-
         with self.lock:
+            if self.cap is None or self.landmarker is None:
+                self.start()
+
+            ret, frame = self.cap.read()
+            if not ret:
+                raise RuntimeError("Could not read frame")
+
+            annotated_frame, status = process_frame(frame, self.landmarker, self.frame_count)
+            self.frame_count += 1
+
             self.latest_frame = annotated_frame
             self.latest_status = status
+            self.handle_attention_alert(status)
 
-        return annotated_frame, status
+            return annotated_frame, status
 
     def get_jpeg_bytes(self):
         frame, _ = self.read()
@@ -324,12 +350,13 @@ class FaceAttentionPipeline:
             return dict(self.latest_status)
 
     def stop(self):
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
-        if self.landmarker is not None:
-            self.landmarker.close()
-            self.landmarker = None
+        with self.lock:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+            if self.landmarker is not None:
+                self.landmarker.close()
+                self.landmarker = None
 
 def analyze_faces():
     """Runs the local OpenCV window mode using the shared processing pipeline."""
