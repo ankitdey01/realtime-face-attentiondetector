@@ -1,4 +1,7 @@
+import os
+import threading
 import time
+
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -15,8 +18,11 @@ def get_camera():
     """Returns a camera capture object using DirectShow backend"""
     return cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
-# Correct eye landmark indices for 468-point FaceMesh system
-# Using the 6-point EAR calculation: [left corner, top left, top right, right corner, bottom right, bottom left]
+
+def get_model_path():
+    """Returns the absolute path to the bundled MediaPipe model."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "face_landmarker.task")
+
 LEFT_EYE_IDX = [33, 160, 158, 133, 153, 144]  # Left eye 6 points
 RIGHT_EYE_IDX = [362, 385, 387, 263, 373, 380]  # Right eye 6 points
 
@@ -114,7 +120,7 @@ def detect_gaze_direction(landmarks, w, h):
         # Horizontal: 0.65-0.7 = screen, <0.65 = left, >0.7 = right
         # Vertical: 0.125-0.5 = normal range, <0.125 = looking up, >0.5 = looking down
         
-        if avg_gaze_ratio < 0.6: # Looking left
+        if avg_gaze_ratio < 0.59: # Looking left
             return "looking_left"
         elif avg_gaze_ratio > 0.69: # Looking right
             return "looking_right"
@@ -163,186 +169,199 @@ def is_user_attentive(gaze_direction, eye_openness_score):
     else:
         return False
 
-def analyze_faces():
-    """
-    Captures video from camera, detects faces using FaceLandmarker, and outputs results to console and video display
-    Uses MediaPipe FaceLandmarker with 468 landmarks for detailed facial analysis
-    """
-    # Create FaceLandmarker options
-    options = FaceLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path='models/face_landmarker.task'),
+
+def create_landmarker_options():
+    return FaceLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=get_model_path()),
         running_mode=VisionRunningMode.VIDEO,
         num_faces=1,
         min_face_detection_confidence=0.5,
         min_face_presence_confidence=0.5,
-        min_tracking_confidence=0.5
+        min_tracking_confidence=0.5,
     )
-    
-    # Get camera
-    cap = get_camera()
-    
-    if not cap.isOpened():
+
+
+def process_frame(frame, landmarker, frame_count):
+    """Annotate a frame and return status metadata."""
+    frame = cv2.flip(frame, 1)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
+    timestamp_ms = frame_count * 33
+    result = landmarker.detect_for_video(mp_image, timestamp_ms)
+
+    status = {
+        "face_detected": False,
+        "num_faces": 0,
+        "gaze_direction": "unknown",
+        "gaze_status": "UNKNOWN",
+        "attention_status": "NO FACE",
+        "eye_openness_score": 0,
+        "attentive": False,
+        "frame_count": frame_count,
+    }
+
+    if result.face_landmarks:
+        status["face_detected"] = True
+        status["num_faces"] = len(result.face_landmarks)
+
+        h, w, _ = frame.shape
+        landmarks = result.face_landmarks[0]
+
+        left_ear = eye_aspect_ratio(landmarks, LEFT_EYE_IDX, w, h)
+        right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE_IDX, w, h)
+        gaze_direction = detect_gaze_direction(landmarks, w, h)
+        eye_openness_score = int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2)
+        attentive = is_user_attentive(gaze_direction, eye_openness_score)
+
+        if not attentive:
+            try:
+                winsound.Beep(1000, 200)
+            except Exception:
+                pass
+
+        if eye_openness_score < 10:
+            gaze_status = "EYES CLOSED"
+            gaze_color = (0, 0, 255)
+            attention_status = "DISTRACTED"
+        else:
+            gaze_status = gaze_direction.replace("_", " ").upper()
+            if gaze_direction == "looking_at_screen":
+                gaze_color = (0, 255, 0)
+                attention_status = "ATTENTIVE"
+            else:
+                gaze_color = (0, 165, 255)
+                attention_status = "DISTRACTED"
+
+        cv2.putText(frame, f"Eye Openness: {eye_openness_score}/100", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(frame, f"Gaze: {gaze_status}", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, gaze_color, 2)
+        cv2.putText(frame, f"Status: {attention_status}", (20, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if attention_status == "ATTENTIVE" else (0, 0, 255), 2)
+
+        box_color = (0, 255, 0) if attentive else (0, 0, 255)
+        cv2.rectangle(frame, (50, 50), (w - 50, h - 50), box_color, 3)
+        cv2.putText(frame, "ATTENTIVE" if attentive else "DISTRACTED", (60, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.8, box_color, 2)
+
+        for idx in LEFT_EYE_IDX + RIGHT_EYE_IDX:
+            x = int(landmarks[idx].x * w)
+            y = int(landmarks[idx].y * h)
+            cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
+
+        print(f"Frame {frame_count}: Face Detected = True | Faces Found: {status['num_faces']} | Eye Openness: {eye_openness_score}/100")
+
+        status.update(
+            {
+                "gaze_direction": gaze_direction,
+                "gaze_status": gaze_status,
+                "attention_status": attention_status,
+                "eye_openness_score": eye_openness_score,
+                "attentive": attentive,
+            }
+        )
+    else:
+        print(f"Frame {frame_count}: Face Detected = False")
+
+    cv2.putText(frame, f"Face Detected: {status['face_detected']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0) if status["face_detected"] else (0, 0, 255), 2)
+    cv2.putText(frame, f"Frame: {frame_count}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    return frame, status
+
+
+class FaceAttentionPipeline:
+    def __init__(self):
+        self.options = create_landmarker_options()
+        self.cap = None
+        self.landmarker = None
+        self.frame_count = 0
+        self.starttime = None
+        self.lock = threading.Lock()
+        self.latest_frame = None
+        self.latest_status = {
+            "face_detected": False,
+            "num_faces": 0,
+            "gaze_direction": "unknown",
+            "gaze_status": "UNKNOWN",
+            "attention_status": "NO FACE",
+            "eye_openness_score": 0,
+            "attentive": False,
+            "frame_count": 0,
+        }
+
+    def start(self):
+        if self.cap is not None:
+            return
+
+        self.cap = get_camera()
+        if not self.cap.isOpened():
+            raise RuntimeError("Could not open camera")
+
+        self.starttime = time.time()
+        self.landmarker = FaceLandmarker.create_from_options(self.options)
+
+    def read(self):
+        if self.cap is None or self.landmarker is None:
+            self.start()
+
+        ret, frame = self.cap.read()
+        if not ret:
+            raise RuntimeError("Could not read frame")
+
+        annotated_frame, status = process_frame(frame, self.landmarker, self.frame_count)
+        self.frame_count += 1
+
+        with self.lock:
+            self.latest_frame = annotated_frame
+            self.latest_status = status
+
+        return annotated_frame, status
+
+    def get_jpeg_bytes(self):
+        frame, _ = self.read()
+        success, encoded = cv2.imencode(".jpg", frame)
+        if not success:
+            raise RuntimeError("Could not encode frame")
+        return encoded.tobytes()
+
+    def get_status(self):
+        with self.lock:
+            return dict(self.latest_status)
+
+    def stop(self):
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+        if self.landmarker is not None:
+            self.landmarker.close()
+            self.landmarker = None
+
+def analyze_faces():
+    """Runs the local OpenCV window mode using the shared processing pipeline."""
+    pipeline = FaceAttentionPipeline()
+
+    try:
+        pipeline.start()
+    except RuntimeError:
         print("Error: Could not open camera")
         return
-    
+
     print("Face Analyzer Started - Press 'q' to quit")
     print("-" * 50)
-    
-    frame_count = 0
-    starttime = time.time()
 
-    # Create FaceLandmarker instance
-    with FaceLandmarker.create_from_options(options) as landmarker:
+    try:
         while True:
-            ret, frame = cap.read()
-            
-            if not ret:
-                print("Error: Could not read frame")
-                break
-            
-            # Flip frame horizontally for mirror view
-            frame = cv2.flip(frame, 1)
-            
-            # Convert frame to MediaPipe Image format
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
-            
-            # Calculate timestamp in milliseconds (must be monotonically increasing)
-            timestamp_ms = frame_count * 33  # Approximate 30 FPS -> 33 ms per frame
-            
-            # Detect face landmarks using FaceLandmarker
-            result = landmarker.detect_for_video(mp_image, timestamp_ms)
-            
-            # Check if faces were detected
-            face_detected = False
-            num_faces = 0
-            
-            if result.face_landmarks:
-                face_detected = True
-                num_faces = len(result.face_landmarks)
-                
-                h, w, _ = frame.shape
-                landmarks = result.face_landmarks[0]
-
-                # Calculate eye aspect ratios
-                left_ear = eye_aspect_ratio(landmarks, LEFT_EYE_IDX, w, h)
-                right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE_IDX, w, h)
-
-                # Detect gaze direction
-                gaze_direction = detect_gaze_direction(landmarks, w, h)
-
-                # Check if user is attentive
-                attentive = is_user_attentive(gaze_direction, int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2))
-
-                # Play beep sound if user is not attentive
-                if not attentive:
-                    try:
-                        winsound.Beep(1000, 200)  # 1000Hz frequency, 200ms duration
-                    except:
-                        pass  # Silently ignore sound errors
-
-                # Debug output to see actual EAR values and gaze
-                print(f"DEBUG - Left EAR: {left_ear:.3f}, Right EAR: {right_ear:.3f}, Gaze: {gaze_direction}, Attentive: {attentive}\n")
-
-                # Normalize EAR to 0–100 per eye (typical EAR range is 0.15-0.35 for open eyes)
-                # Eyes closed: ~0.0-0.15, Eyes open: ~0.2-0.35
-                eye_openness_score = int((np.clip((left_ear - 0.1) * 400, 0, 100) + np.clip((right_ear - 0.1) * 400, 0, 100)) / 2)
-
-                # Determine gaze status and color
-                if eye_openness_score < 10:
-                    gaze_status = "EYES CLOSED"
-                    gaze_color = (0, 0, 255)  # Red for closed eyes
-                    attention_status = "DISTRACTED"
-                else:
-                    gaze_status = gaze_direction.replace("_", " ").upper()
-                    if gaze_direction == "looking_at_screen":
-                        gaze_color = (0, 255, 0)  # Green for looking at screen
-                        attention_status = "ATTENTIVE"
-                    else:
-                        gaze_color = (0, 165, 255)  # Orange for looking elsewhere
-                        attention_status = "DISTRACTED"
-                
-                cv2.putText(
-                    frame,
-                    f"Eye Openness: {eye_openness_score}/100",
-                    (20, 120),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (255, 255, 0),
-                    2
-                )
-                
-                cv2.putText(
-                    frame,
-                    f"Gaze: {gaze_status}",
-                    (20, 150),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    gaze_color,
-                    2
-                )
-                
-                cv2.putText(
-                    frame,
-                    f"Status: {attention_status}",
-                    (20, 180),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 255, 0) if attention_status == "ATTENTIVE" else (0, 0, 255),
-                    2
-                )
-                
-                # Draw attention status box around face
-                box_color = (0, 255, 0) if attentive else (0, 0, 255)  # Green if attentive, Red if distracted
-                box_thickness = 3
-                
-                # Draw rectangle around the detected face area
-                face_h, face_w = h, w
-                cv2.rectangle(frame, (50, 50), (face_w - 50, face_h - 50), box_color, box_thickness)
-                
-                # Add attention status text on the box
-                status_text = "ATTENTIVE" if attentive else "DISTRACTED"
-                cv2.putText(frame, status_text, (60, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.8, box_color, 2)
-                
-                # Draw simple eye landmarks
-                for idx in LEFT_EYE_IDX + RIGHT_EYE_IDX:
-                    x = int(landmarks[idx].x * w)
-                    y = int(landmarks[idx].y * h)
-                    cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
-                
-                # Print to console
-                print(f"Frame {frame_count}: Face Detected = True | Faces Found: {num_faces} | Eye Openness: {eye_openness_score}/100")
-            else:
-                print(f"Frame {frame_count}: Face Detected = False")
-            
-            # Add text overlay on video
-            status_text = f"Face Detected: {face_detected}"
-            color = (0, 255, 0) if face_detected else (0, 0, 255)
-            cv2.putText(frame, status_text, (20, 40),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-
-            # Display frame count
-            cv2.putText(frame, f"Frame: {frame_count}", (20, 80),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-            # Show the frame
+            frame, _ = pipeline.read()
             cv2.imshow("Face Detection Analysis", frame)
 
-            frame_count += 1
-
-            # Add delay to reduce FPS to ~10 frames per second
-            #time.sleep(0.3)  # 100ms delay = ~3 FPS
-
-            # Exit on 'q' key press
-            if cv2.waitKey(1) & 0xFF == ord('q') or cv2.waitKey(1) & 0xFF == ord('Q'):
+            if cv2.waitKey(1) & 0xFF in (ord('q'), ord('Q')):
                 break
+    finally:
+        pipeline.stop()
+        cv2.destroyAllWindows()
+        print("-" * 100)
+        print("Face Analyzer Stopped")
+        print(f"Total frames processed: {pipeline.frame_count}")
+        if pipeline.starttime is not None:
+            print(f"Ran for approximately {(time.time() - pipeline.starttime):.2f} seconds")
 
-    # Cleanup
-    cap.release()
-    cv2.destroyAllWindows()
-    print("-" * 100)
-    print("Face Analyzer Stopped")
-    print(f"Total frames processed: {frame_count}")
-    print(f"Ran for approximately {(time.time() - starttime):.2f} seconds")
+
+PIPELINE = FaceAttentionPipeline()
 
 if __name__ == "__main__":
     analyze_faces()

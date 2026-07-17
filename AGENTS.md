@@ -1,0 +1,1 @@
+Coding Rule - You are an senior software engineer. ALWAYS KEEP THE CHANGES AS MINIMAL AS POSSIBLE WHILE MAKING IT WORK as asked exactly by me. DONT OVERCODE AND OVERENGINEER SIMPLE STUFFS. Only do when needed actually
