@@ -313,7 +313,7 @@ class FaceAttentionPipeline:
     def handle_attention_alert(self, status):
         distracted = status["face_detected"] and not status["attentive"]
         now = time.time()
-        should_alert = distracted and (not self.was_distracted or now - self.last_alert_time >= self.ALERT_COOLDOWN_SECONDS)
+        should_alert = distracted and now - self.last_alert_time >= self.ALERT_COOLDOWN_SECONDS
 
         self.was_distracted = distracted
         if should_alert:
